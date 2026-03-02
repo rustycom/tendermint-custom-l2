@@ -1,11 +1,11 @@
 # my-abci-app
 
-A Tendermint ABCI application that provides a persistent key-value store with an optional **price oracle**: each validator checks user-submitted asset prices (e.g. BTC/USD) against its own configured source (CoinGecko, Binance, or Kraken) before allowing the transaction into the block.
+A Tendermint ABCI application that provides a persistent key-value store with an optional **price oracle**: each validator checks user-submitted asset prices against its own configured source (CoinGecko, Binance, or Kraken) before allowing the transaction into the block. **Supported pairs:** `BTC/USD`, `ETH/USD`, `SOL/USD`.
 
 ## What this project does
 
 - **KV store**: Standard `key=value` transactions are stored in LevelDB and can be queried via Tendermint RPC.
-- **Price oracle**: Transactions with the `price:BTC/USD=<value>` format are validated in `CheckTx` against an external price source. If the claimed price is within a configurable tolerance (default 5%) of the oracle price, the tx is accepted; otherwise it is rejected and never included in a block.
+- **Price oracle**: Transactions with the `price:<ASSET>=<value>` format (e.g. `price:BTC/USD=95000`) are validated in `CheckTx` against an external price source. Supported assets: **BTC/USD**, **ETH/USD**, **SOL/USD**. If the claimed price is within a configurable tolerance (default 5%) of the oracle price, the tx is accepted; otherwise it is rejected and never included in a block.
 - **Three validators**: The app is designed to run with three Tendermint validator nodes, each connected to its own ABCI instance. Each ABCI instance can use a different price source (e.g. CoinGecko, Binance, Kraken) so the network only accepts prices that multiple oracles agree on.
 
 ## Prerequisites
@@ -55,11 +55,17 @@ Use any node’s RPC (e.g. Node 1 on port 26657).
 curl 'http://localhost:26657/broadcast_tx_commit?tx="name=alice"'
 ```
 
-**Price (BTC/USD; validated by oracle):**
+**Price (validated by oracle; supported: BTC/USD, ETH/USD, SOL/USD):**
 
 ```bash
-# Should succeed when close to current BTC/USD (live) or ~95000 (mock)
+# BTC/USD — succeed when close to live price or ~95000 (mock)
 curl 'http://localhost:26657/broadcast_tx_commit?tx="price:BTC/USD=95000.00"'
+
+# ETH/USD — succeed when close to live price or ~3500 (mock)
+curl 'http://localhost:26657/broadcast_tx_commit?tx="price:ETH/USD=3500.00"'
+
+# SOL/USD — succeed when close to live price or ~150 (mock)
+curl 'http://localhost:26657/broadcast_tx_commit?tx="price:SOL/USD=150.00"'
 
 # Likely rejected (too far from oracle price)
 curl 'http://localhost:26657/broadcast_tx_commit?tx="price:BTC/USD=1.00"'
@@ -70,6 +76,8 @@ curl 'http://localhost:26657/broadcast_tx_commit?tx="price:BTC/USD=1.00"'
 ```bash
 curl 'http://localhost:26657/abci_query?data="name"'
 curl 'http://localhost:26657/abci_query?data="price:BTC/USD"'
+curl 'http://localhost:26657/abci_query?data="price:ETH/USD"'
+curl 'http://localhost:26657/abci_query?data="price:SOL/USD"'
 ```
 
 ## Verify that nodes are running
