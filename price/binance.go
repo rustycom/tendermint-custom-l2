@@ -10,6 +10,8 @@ import (
 
 var assetToBinanceSymbol = map[string]string{
 	"BTC/USD": "BTCUSDT",
+	"ETH/USD": "ETHUSDT",
+	"SOL/USD": "SOLUSDT",
 }
 
 type BinanceFetcher struct {

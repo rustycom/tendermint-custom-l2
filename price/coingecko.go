@@ -9,6 +9,8 @@ import (
 
 var assetToCoinGeckoID = map[string]string{
 	"BTC/USD": "bitcoin",
+	"ETH/USD": "ethereum",
+	"SOL/USD": "solana",
 }
 
 type CoinGeckoFetcher struct {

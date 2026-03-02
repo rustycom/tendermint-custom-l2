@@ -10,12 +10,16 @@ import (
 
 var assetToKrakenPair = map[string]string{
 	"BTC/USD": "XBTUSD",
+	"ETH/USD": "ETHUSD",
+	"SOL/USD": "SOLUSD",
 }
 
 // krakenPairKey maps our pair name to the key Kraken actually uses in the
 // response body (Kraken prefixes with "X" and "Z" for some pairs).
 var krakenPairKey = map[string]string{
 	"XBTUSD": "XXBTZUSD",
+	"ETHUSD": "XETHZUSD",
+	"SOLUSD": "SOLUSD",
 }
 
 type KrakenFetcher struct {
