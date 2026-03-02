@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"my-abci-app/app"
+	"my-abci-app/price"
 
 	abciserver "github.com/tendermint/tendermint/abci/server"
 	"github.com/tendermint/tendermint/libs/log"
@@ -27,6 +29,8 @@ func main() {
 	listenAddr := flag.String("addr", "tcp://0.0.0.0:26658", "ABCI server listen address")
 	dataDir := flag.String("data-dir", "./data", "Directory for the LevelDB database")
 	name := flag.String("name", "", "Human-readable instance name for log output (e.g. app1)")
+	priceSource := flag.String("price-source", "", "Price oracle source: coingecko, binance, kraken, mock1, mock2, mock3")
+	priceTolerance := flag.Float64("price-tolerance", 0.05, "Max allowed price deviation (0.05 = 5%)")
 	flag.Parse()
 
 	if *name == "" {
@@ -45,13 +49,23 @@ func main() {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Create the application.
-	//
-	// NewKVStoreApp opens (or re-opens) the LevelDB database at dataDir.
-	// If this is a restart, all previously committed data is immediately
-	// available — no replay needed for the app itself.
+	// Build the price fetcher (if configured).
 	// ---------------------------------------------------------------------------
-	kvApp, err := app.NewKVStoreApp(*name, *dataDir, nil, 0)
+	var fetcher price.PriceFetcher
+	if *priceSource != "" {
+		raw, err := newPriceFetcher(*priceSource)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		fetcher = price.NewCachedFetcher(raw, 10*time.Second)
+		fmt.Printf("Price oracle: source=%s tolerance=%.1f%%\n", raw.Name(), *priceTolerance*100)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Create the application.
+	// ---------------------------------------------------------------------------
+	kvApp, err := app.NewKVStoreApp(*name, *dataDir, fetcher, *priceTolerance)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create app: %v\n", err)
 		os.Exit(1)
@@ -91,4 +105,23 @@ func main() {
 	<-sigCh
 
 	fmt.Println("\nShutting down gracefully...")
+}
+
+func newPriceFetcher(source string) (price.PriceFetcher, error) {
+	switch source {
+	case "coingecko":
+		return price.NewCoinGeckoFetcher(), nil
+	case "binance":
+		return price.NewBinanceFetcher(), nil
+	case "kraken":
+		return price.NewKrakenFetcher(), nil
+	case "mock1":
+		return price.NewMock1(), nil
+	case "mock2":
+		return price.NewMock2(), nil
+	case "mock3":
+		return price.NewMock3(), nil
+	default:
+		return nil, fmt.Errorf("unknown price source %q (valid: coingecko, binance, kraken, mock1, mock2, mock3)", source)
+	}
 }
