@@ -1,0 +1,8 @@
+# Binaries
+kvstore-app
+my-abci-app
+
+# Data directories (runtime state)
+data1/
+data2/
+data3/
