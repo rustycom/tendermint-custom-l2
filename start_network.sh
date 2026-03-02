@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TENDERMINT="$(command -v tendermint)"
+KVSTORE_APP="${SCRIPT_DIR}/kvstore-app"
+
+PIDS=()
+
+cleanup() {
+    echo ""
+    echo "Shutting down all processes..."
+    for pid in "${PIDS[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null
+    echo "All processes stopped."
+}
+trap cleanup EXIT INT TERM
+
+echo "=== Starting 3 ABCI app instances ==="
+
+"$KVSTORE_APP" --name app1 --addr tcp://0.0.0.0:26658 --data-dir "${SCRIPT_DIR}/data1" &
+PIDS+=($!)
+echo "  ABCI app1 (port 26658, data1) — PID $!"
+
+"$KVSTORE_APP" --name app2 --addr tcp://0.0.0.0:26659 --data-dir "${SCRIPT_DIR}/data2" &
+PIDS+=($!)
+echo "  ABCI app2 (port 26659, data2) — PID $!"
+
+"$KVSTORE_APP" --name app3 --addr tcp://0.0.0.0:26662 --data-dir "${SCRIPT_DIR}/data3" &
+PIDS+=($!)
+echo "  ABCI app3 (port 26662, data3) — PID $!"
+
+sleep 2
+echo ""
+echo "=== Starting 3 Tendermint validator nodes ==="
+
+"$TENDERMINT" start --home ~/.tendermint &
+PIDS+=($!)
+echo "  Node 1 (P2P=26656, RPC=26657, ABCI->26658) — PID $!"
+
+"$TENDERMINT" start --home ~/.tendermint2 &
+PIDS+=($!)
+echo "  Node 2 (P2P=26661, RPC=26660, ABCI->26659) — PID $!"
+
+"$TENDERMINT" start --home ~/.tendermint3 &
+PIDS+=($!)
+echo "  Node 3 (P2P=26664, RPC=26663, ABCI->26662) — PID $!"
+
+echo ""
+echo "=== Network running (3 validators). Press Ctrl+C to stop all. ==="
+wait
