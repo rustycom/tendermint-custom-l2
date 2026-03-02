@@ -51,7 +51,7 @@ func main() {
 	// If this is a restart, all previously committed data is immediately
 	// available — no replay needed for the app itself.
 	// ---------------------------------------------------------------------------
-	kvApp, err := app.NewKVStoreApp(*name, *dataDir)
+	kvApp, err := app.NewKVStoreApp(*name, *dataDir, nil, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create app: %v\n", err)
 		os.Exit(1)

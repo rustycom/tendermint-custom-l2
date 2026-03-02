@@ -5,13 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+
+	"my-abci-app/price"
 
 	abcitypes "github.com/tendermint/tendermint/abci/types"
 	dbm "github.com/tendermint/tm-db"
 )
+
+const priceTxPrefix = "price:"
 
 // ---------------------------------------------------------------------------
 // DB key layout
@@ -52,10 +58,12 @@ const (
 type KVStoreApp struct {
 	abcitypes.BaseApplication
 
-	name          string            // human-readable instance identifier for log output
-	db            dbm.DB            // on-disk LevelDB database (survives restarts)
-	staged        map[string][]byte // pending writes for the current in-flight block
-	currentHeight int64             // height of the block being processed (set in BeginBlock)
+	name           string            // human-readable instance identifier for log output
+	db             dbm.DB            // on-disk LevelDB database (survives restarts)
+	staged         map[string][]byte // pending writes for the current in-flight block
+	currentHeight  int64             // height of the block being processed (set in BeginBlock)
+	priceFetcher   price.PriceFetcher // oracle source used in CheckTx to validate price txs (may be nil)
+	priceTolerance float64            // max allowed relative deviation (e.g. 0.05 = 5%)
 
 	mu sync.RWMutex // protects staged + currentHeight from concurrent CheckTx / Query
 }
@@ -65,15 +73,17 @@ type KVStoreApp struct {
 //
 // dbm.NewDB(name, backend, dir) creates a file named <name>.db inside <dir>.
 // GoLevelDBBackend is pure Go — no CGo required, works everywhere.
-func NewKVStoreApp(name, dataDir string) (*KVStoreApp, error) {
+func NewKVStoreApp(name, dataDir string, fetcher price.PriceFetcher, tolerance float64) (*KVStoreApp, error) {
 	db, err := dbm.NewDB("kvstore", dbm.GoLevelDBBackend, dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database at %s: %w", dataDir, err)
 	}
 	return &KVStoreApp{
-		name:   name,
-		db:     db,
-		staged: make(map[string][]byte),
+		name:           name,
+		db:             db,
+		staged:         make(map[string][]byte),
+		priceFetcher:   fetcher,
+		priceTolerance: tolerance,
 	}, nil
 }
 
@@ -138,6 +148,12 @@ func (app *KVStoreApp) CheckTx(req abcitypes.RequestCheckTx) abcitypes.ResponseC
 		app.log("CheckTx REJECTED: %s", err)
 		return abcitypes.ResponseCheckTx{Code: 1, Log: err.Error()}
 	}
+
+	if err := app.validatePriceTx(req.Tx); err != nil {
+		app.log("CheckTx PRICE REJECTED: %s", err)
+		return abcitypes.ResponseCheckTx{Code: 2, Log: err.Error()}
+	}
+
 	app.log("CheckTx OK: %s", req.Tx)
 	return abcitypes.ResponseCheckTx{Code: 0}
 }
@@ -299,6 +315,52 @@ func (app *KVStoreApp) Query(req abcitypes.RequestQuery) abcitypes.ResponseQuery
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+// validatePriceTx checks transactions with the "price:" prefix against the
+// configured oracle source. Returns nil for non-price transactions or when
+// no price fetcher is configured.
+//
+// This runs in CheckTx only (non-deterministic, per-node). Each validator can
+// independently accept or reject based on its own oracle source.
+func (app *KVStoreApp) validatePriceTx(tx []byte) error {
+	parts := bytes.SplitN(tx, []byte("="), 2)
+	key := string(parts[0])
+
+	if !strings.HasPrefix(key, priceTxPrefix) {
+		return nil
+	}
+	if app.priceFetcher == nil {
+		return nil
+	}
+
+	asset := strings.TrimPrefix(key, priceTxPrefix)
+	claimedPrice, err := strconv.ParseFloat(string(parts[1]), 64)
+	if err != nil {
+		return fmt.Errorf("invalid price value: %w", err)
+	}
+
+	oraclePrice, err := app.priceFetcher.FetchPrice(asset)
+	if err != nil {
+		return fmt.Errorf("oracle fetch failed: %w", err)
+	}
+
+	if oraclePrice == 0 {
+		return fmt.Errorf("oracle returned zero price for %s", asset)
+	}
+
+	deviation := math.Abs(claimedPrice-oraclePrice) / oraclePrice
+	if deviation > app.priceTolerance {
+		return fmt.Errorf(
+			"price %s: claimed=%.2f oracle(%s)=%.2f deviation=%.2f%% exceeds tolerance=%.2f%%",
+			asset, claimedPrice, app.priceFetcher.Name(), oraclePrice,
+			deviation*100, app.priceTolerance*100,
+		)
+	}
+
+	app.log("Price validated: %s claimed=%.2f oracle(%s)=%.2f deviation=%.2f%%",
+		asset, claimedPrice, app.priceFetcher.Name(), oraclePrice, deviation*100)
+	return nil
+}
 
 // validateTx ensures the transaction is in "key=value" format.
 func (app *KVStoreApp) validateTx(tx []byte) error {
