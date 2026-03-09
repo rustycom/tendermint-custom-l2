@@ -1,0 +1,74 @@
+# Three-node Tendermint network: one container per node (avoids P2P "duplicate CONN" on localhost).
+# - init: runs once, creates validator configs with peer hostnames node1/node2/node3.
+# - node1, node2, node3: each runs one ABCI app + one Tendermint; resume from latest height if data exists.
+
+services:
+  init:
+    build: .
+    entrypoint: ["/app/entrypoint-init.sh"]
+    volumes:
+      - chain-nodes:/app/nodes
+    restart: "no"
+
+  node1:
+    build: .
+    image: my-abci-app-node
+    hostname: node1
+    environment:
+      NODE_INDEX: "1"
+      APP_ROOT: /app
+      USE_MOCK_ORACLES: ${USE_MOCK_ORACLES:-0}
+    volumes:
+      - chain-nodes:/app/nodes
+      - chain-data1:/app/data1
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  node2:
+    build: .
+    image: my-abci-app-node
+    hostname: node2
+    environment:
+      NODE_INDEX: "2"
+      APP_ROOT: /app
+      USE_MOCK_ORACLES: ${USE_MOCK_ORACLES:-0}
+    volumes:
+      - chain-nodes:/app/nodes
+      - chain-data2:/app/data2
+    ports:
+      - "26660:26660"
+      - "26661:26661"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  node3:
+    build: .
+    image: my-abci-app-node
+    hostname: node3
+    environment:
+      NODE_INDEX: "3"
+      APP_ROOT: /app
+      USE_MOCK_ORACLES: ${USE_MOCK_ORACLES:-0}
+    volumes:
+      - chain-nodes:/app/nodes
+      - chain-data3:/app/data3
+    ports:
+      - "26663:26663"
+      - "26664:26664"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  chain-nodes:
+  chain-data1:
+  chain-data2:
+  chain-data3:
