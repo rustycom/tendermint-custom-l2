@@ -5,49 +5,82 @@ A Tendermint ABCI application that provides a persistent key-value store with an
 ## What this project does
 
 - **KV store**: Standard `key=value` transactions are stored in LevelDB and can be queried via Tendermint RPC.
-- **Price oracle**: Transactions with the `price:<ASSET>=<value>` format (e.g. `price:BTC/USD=95000`) are validated in `CheckTx` against an external price source. Supported assets: **BTC/USD**, **ETH/USD**, **SOL/USD**. If the claimed price is within a configurable tolerance (default 5%) of the oracle price, the tx is accepted; otherwise it is rejected and never included in a block.
-- **Three validators**: The app is designed to run with three Tendermint validator nodes, each connected to its own ABCI instance. Each ABCI instance can use a different price source (e.g. CoinGecko, Binance, Kraken) so the network only accepts prices that multiple oracles agree on.
+- **Price oracle**: Transactions with the `price:<ASSET>=<value>` format (e.g. `price:BTC/USD=95000`) are validated in `CheckTx` against an external price source. Supported assets: **BTC/USD**, **ETH/USD**, **SOL/USD**. If the claimed price is within a configurable tolerance (default 5%) of the oracle price, the tx is accepted; otherwise it is rejected.
+- **Three validators**: Runs as three Tendermint validator nodes in Docker, each with its own ABCI instance. You can run with **live price APIs** (CoinGecko, Binance, Kraken) or **mock prices** (offline, no API calls).
 
 ## Prerequisites
 
-- **Go 1.21+**
-- **Tendermint** binary on your `PATH` (e.g. `go install github.com/tendermint/tendermint/cmd/tendermint@v0.34.24` or use your own build).
-- Three Tendermint node home directories configured with different ports and the same genesis (e.g. `~/.tendermint`, `~/.tendermint2`, `~/.tendermint3`). Use the project’s setup instructions if you need to create or reset them.
+- **Docker** and **Docker Compose** (v2+)
 
-## Build
+## Run the network (Docker)
 
-```bash
-go build -o kvstore-app .
-```
-
-## Run the network
-
-One script starts all three ABCI apps and all three Tendermint nodes:
+From the project root:
 
 ```bash
-./start_network.sh
+docker compose up --build -d
 ```
 
-- **Live mode** (default): Each ABCI instance uses a real price API (CoinGecko, Binance, Kraken). Requires internet.
-- **Mock mode** (offline): Use simulated price sources so no API calls are made:
+This starts an init container (validator setup), then three node containers. Chain data is stored in Docker volumes; on the first run the chain starts at height 0. On later runs it **resumes from the latest block height** unless you remove the volumes.
+
+**View logs:**
 
 ```bash
-./start_network.sh --mock
+docker compose logs -f
 ```
 
-Press **Ctrl+C** to stop all processes.
+**Stop (containers only; data kept):**
+
+```bash
+docker compose down
+```
+
+**Stop and wipe all chain data (next start from height 0):**
+
+```bash
+docker compose down -v
+```
+
+### Price mode: live vs mock
+
+You can run the nodes with **real price APIs** or **mock (simulated) prices**.
+
+| Mode   | Use case              | Internet |
+|--------|------------------------|----------|
+| **Live** (default) | Real BTC/ETH/SOL prices from CoinGecko, Binance, Kraken | Required |
+| **Mock**          | Offline testing; simulated prices (~95000 BTC, ~3500 ETH, ~150 SOL) | Not required |
+
+**Live price (default):**
+
+```bash
+docker compose up --build -d
+```
+
+**Mock price (offline):**
+
+```bash
+USE_MOCK_ORACLES=1 docker compose up --build -d
+```
+
+Or create a `.env` file in the project root:
+
+```
+USE_MOCK_ORACLES=1
+```
+
+Then run `docker compose up --build -d` and it will use mock oracles.
 
 ### Port layout
 
-| Component   | Node 1   | Node 2   | Node 3   |
-|------------|----------|----------|----------|
-| ABCI       | 26658    | 26659    | 26662    |
-| RPC        | 26657    | 26660    | 26663    |
-| P2P        | 26656    | 26661    | 26664    |
+| Component | Node 1 | Node 2 | Node 3 |
+|-----------|--------|--------|--------|
+| RPC       | 26657  | 26660  | 26663  |
+| P2P       | 26656  | 26661  | 26664  |
+
+RPC is exposed on the host; use **Node 1** at `http://localhost:26657` for queries and sending transactions.
 
 ## Send transactions
 
-Use any node’s RPC (e.g. Node 1 on port 26657).
+Use Node 1's RPC (or any node's port from the table above).
 
 **Key-value (any key=value):**
 
@@ -58,13 +91,13 @@ curl 'http://localhost:26657/broadcast_tx_commit?tx="name=alice"'
 **Price (validated by oracle; supported: BTC/USD, ETH/USD, SOL/USD):**
 
 ```bash
-# BTC/USD — succeed when close to live price or ~95000 (mock)
+# BTC/USD — succeeds when close to live price or ~95000 (mock)
 curl 'http://localhost:26657/broadcast_tx_commit?tx="price:BTC/USD=95000.00"'
 
-# ETH/USD — succeed when close to live price or ~3500 (mock)
+# ETH/USD — succeeds when close to live price or ~3500 (mock)
 curl 'http://localhost:26657/broadcast_tx_commit?tx="price:ETH/USD=3500.00"'
 
-# SOL/USD — succeed when close to live price or ~150 (mock)
+# SOL/USD — succeeds when close to live price or ~150 (mock)
 curl 'http://localhost:26657/broadcast_tx_commit?tx="price:SOL/USD=150.00"'
 
 # Likely rejected (too far from oracle price)
@@ -76,93 +109,39 @@ curl 'http://localhost:26657/broadcast_tx_commit?tx="price:BTC/USD=1.00"'
 ```bash
 curl 'http://localhost:26657/abci_query?data="name"'
 curl 'http://localhost:26657/abci_query?data="price:BTC/USD"'
-curl 'http://localhost:26657/abci_query?data="price:ETH/USD"'
-curl 'http://localhost:26657/abci_query?data="price:SOL/USD"'
 ```
 
-## Verify that nodes are running
+## Verify the network
 
-**1. Check RPC and block height**
+**Block height (should increase over time):**
 
 ```bash
 curl -s http://localhost:26657/status | jq '.result.sync_info.latest_block_height'
 ```
 
-If the network is producing blocks, this height increases over time. You can do the same for the other nodes (ports 26660 and 26663).
-
-**2. Check that RPC and P2P ports are in use**
-
-```bash
-lsof -i :26657   # Node 1 RPC
-lsof -i :26656   # Node 1 P2P
-lsof -i :26660   # Node 2 RPC
-lsof -i :26663   # Node 3 RPC
-```
-
-**3. Optional: check peer count**
+**Peer count (expect 2 when all three validators are up):**
 
 ```bash
 curl -s http://localhost:26657/net_info | jq '.result.n_peers'
 ```
 
-You should see 2 peers when all three validators are running.
-
-## Verify that the ABCI app is running
-
-**1. Check that ABCI ports are listening**
-
-Each Tendermint node talks to its ABCI app on a fixed port:
-
-```bash
-lsof -i :26658   # ABCI for Node 1
-lsof -i :26659   # ABCI for Node 2
-lsof -i :26662   # ABCI for Node 3
-```
-
-**2. Confirm blocks are being produced**
-
-If Tendermint is connected to the ABCI app and consensus is working, blocks will advance:
-
-```bash
-curl -s http://localhost:26657/status | jq '.result.sync_info'
-```
-
-`latest_block_height` should increase every ~1 second when the network is healthy.
-
-**3. Send a transaction and query**
-
-If the ABCI app is running and Tendermint is connected, a committed tx will be applied and queryable:
+**Quick test (send and query):**
 
 ```bash
 curl 'http://localhost:26657/broadcast_tx_commit?tx="test=hello"'
 curl 'http://localhost:26657/abci_query?data="test"'
 ```
 
-You should see `"value":"hello"` (base64-encoded) in the query response.
+## Summary
 
-**4. Console output**
-
-When you run `./start_network.sh`, all six processes share the same terminal. Log lines prefixed with `[app1]`, `[app2]`, or `[app3]` come from the ABCI app (e.g. `BeginBlock`, `Commit`, `CheckTx OK`, `Price validated`). Tendermint logs are the ones with `module=consensus` or `module=state`.
-
-## Running a single ABCI instance (manual)
-
-For one node only:
-
-```bash
-./kvstore-app --name app1 --addr tcp://0.0.0.0:26658 --data-dir ./data1 --price-source coingecko
-```
-
-Then start Tendermint with the matching home (e.g. `tendermint start --home ~/.tendermint`).
-
-## CLI flags (kvstore-app)
-
-| Flag               | Default           | Description |
-|--------------------|-------------------|-------------|
-| `--addr`           | `tcp://0.0.0.0:26658` | ABCI listen address |
-| `--data-dir`       | `./data`          | LevelDB data directory |
-| `--name`           | (same as data-dir)| Instance name for logs |
-| `--price-source`   | (none)            | `coingecko`, `binance`, `kraken`, `mock1`, `mock2`, `mock3` |
-| `--price-tolerance`| `0.05` (5%)      | Max allowed deviation from oracle price |
+| Task | Command |
+|------|---------|
+| Start (live prices) | `docker compose up --build -d` |
+| Start (mock prices) | `USE_MOCK_ORACLES=1 docker compose up --build -d` |
+| Logs | `docker compose logs -f` |
+| Stop (keep data) | `docker compose down` |
+| Stop and reset chain | `docker compose down -v` |
+| RPC (Node 1) | `http://localhost:26657` |
 
 ## License
 
