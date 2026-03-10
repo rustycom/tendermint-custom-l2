@@ -48,8 +48,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "Starting ABCI app${NODE_INDEX} (${ABCI_ADDR}, data=${DATA_DIR})"
-"$KVSTORE_APP" --name "app${NODE_INDEX}" --addr "$ABCI_ADDR" --data-dir "$DATA_DIR" --price-source "$SRC" &
+PRICE_TOLERANCE="${PRICE_TOLERANCE:-0.05}"
+echo "Starting ABCI app${NODE_INDEX} (${ABCI_ADDR}, data=${DATA_DIR}, price-tolerance=${PRICE_TOLERANCE})"
+"$KVSTORE_APP" --name "app${NODE_INDEX}" --addr "$ABCI_ADDR" --data-dir "$DATA_DIR" --price-source "$SRC" --price-tolerance "$PRICE_TOLERANCE" &
 PIDS+=($!)
 
 sleep 2
