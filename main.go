@@ -30,11 +30,16 @@ func main() {
 	dataDir := flag.String("data-dir", "./data", "Directory for the LevelDB database")
 	name := flag.String("name", "", "Human-readable instance name for log output (e.g. app1)")
 	priceSource := flag.String("price-source", "", "Price oracle source: coingecko, binance, kraken, mock1, mock2, mock3")
-	priceTolerance := flag.Float64("price-tolerance", 0.05, "Max allowed price deviation (0.05 = 5%)")
+	priceTolerance := flag.Float64("price-tolerance", 0.05, "Max allowed price deviation (0.05 = 5%); must be in (0, 0.05]")
 	flag.Parse()
 
 	if *name == "" {
 		*name = *dataDir
+	}
+
+	if *priceTolerance <= 0 || *priceTolerance > 0.05 {
+		fmt.Fprintf(os.Stderr, "invalid --price-tolerance %g: must be in range (0, 0.05] (max 5%%)\n", *priceTolerance)
+		os.Exit(1)
 	}
 
 	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout)).With("module", "abci-server")
